@@ -11,6 +11,7 @@ extern "C" {
 
 #include "esp_err.h"
 #include "esp_zigbee_type.h"
+#include "esp_zigbee_core.h"
 
 /**
  * @brief OTA upgrade status events
