@@ -243,7 +243,7 @@ esp_err_t zigbee_ota_init(esp_zb_cluster_list_t *cluster_list, uint8_t endpoint,
     /* Create OTA cluster configuration */
     esp_zb_ota_cluster_cfg_t ota_cluster_cfg = {
         .ota_upgrade_file_version = config->current_file_version,
-        .ota_upgrade_downloaded_file_ver = OTA_UPGRADE_DOWNLOADED_FILE_VERSION,
+        .ota_upgrade_downloaded_file_ver = ESP_ZB_ZCL_OTA_UPGRADE_DOWNLOADED_FILE_VERSION_DEF_VALUE,
         .ota_upgrade_manufacturer = config->manufacturer_code,
         .ota_upgrade_image_type = config->image_type,
     };
