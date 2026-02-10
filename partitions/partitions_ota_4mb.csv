@@ -1,0 +1,24 @@
+# ESP32-H2/C6 Partition Table - 4MB Flash with Dual OTA
+# Name,   Type, SubType, Offset,  Size,   Flags
+# Note: if you have increased the bootloader size, make sure to update the offsets to avoid overlap
+
+# NVS partition for non-volatile storage
+nvs,        data, nvs,      0x9000,  24K,
+
+# OTA data partition (tracks active OTA partition)
+otadata,    data, ota,      ,        8K,
+
+# PHY init data
+phy_init,   data, phy,      ,        4K,
+
+# OTA partition 0 (first firmware partition)
+ota_0,      app,  ota_0,    ,        1700K,
+
+# OTA partition 1 (second firmware partition for updates)
+ota_1,      app,  ota_1,    ,        1700K,
+
+# Zigbee persistent storage (bindings, reporting config, etc.)
+zb_storage, data, fat,      ,        16K,
+
+# Zigbee factory data (install codes, certificates)
+zb_fct,     data, fat,      ,        1K,
