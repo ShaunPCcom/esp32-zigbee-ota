@@ -110,7 +110,20 @@ static esp_err_t ota_upgrade_status_handler(esp_zb_zcl_ota_upgrade_value_message
 
         /* Write data to OTA partition */
         if (message.payload_size && message.payload) {
-            ret = esp_ota_write(s_ota_state.ota_handle, message.payload, message.payload_size);
+            const uint8_t *write_data = (const uint8_t *)message.payload;
+            uint16_t write_size = message.payload_size;
+
+            /* First chunk: skip OTA element tag header (2 bytes tag ID + 4 bytes length) */
+            if (s_ota_state.downloaded_size == message.payload_size) {
+                #define OTA_ELEMENT_TAG_HEADER_LEN 6
+                if (message.payload_size > OTA_ELEMENT_TAG_HEADER_LEN) {
+                    write_data += OTA_ELEMENT_TAG_HEADER_LEN;
+                    write_size -= OTA_ELEMENT_TAG_HEADER_LEN;
+                    ESP_LOGI(TAG, "Stripped %d-byte OTA element header from first chunk", OTA_ELEMENT_TAG_HEADER_LEN);
+                }
+            }
+
+            ret = esp_ota_write(s_ota_state.ota_handle, write_data, write_size);
             if (ret != ESP_OK) {
                 ESP_LOGE(TAG, "esp_ota_write failed: %s", esp_err_to_name(ret));
                 invoke_status_callback(ZIGBEE_OTA_STATUS_FAILED, 0);
