@@ -186,8 +186,7 @@ static esp_err_t ota_upgrade_status_handler(esp_zb_zcl_ota_upgrade_value_message
             }
 
             invoke_status_callback(ZIGBEE_OTA_STATUS_SUCCESS, 100);
-            ESP_LOGW(TAG, "OTA complete, restarting in 2 seconds...");
-            vTaskDelay(pdMS_TO_TICKS(2000));
+            ESP_LOGW(TAG, "OTA complete, restarting...");
             esp_restart();
         }
         break;
