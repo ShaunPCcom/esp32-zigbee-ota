@@ -63,6 +63,19 @@ static uint8_t calculate_progress(uint32_t downloaded, uint32_t total)
 }
 
 /**
+ * @brief Deferred restart callback for OTA completion
+ * 
+ * Scheduled via esp_zb_scheduler_alarm() to execute after the Zigbee stack
+ * completes post-OTA processing (Upgrade End Response TX, etc.)
+ */
+static void ota_deferred_restart(uint8_t param)
+{
+    (void)param;
+    ESP_LOGW(TAG, "Deferred OTA restart executing now");
+    esp_restart();
+}
+
+/**
  * @brief Handle OTA upgrade status updates
  */
 static esp_err_t ota_upgrade_status_handler(esp_zb_zcl_ota_upgrade_value_message_t message)
@@ -186,8 +199,8 @@ static esp_err_t ota_upgrade_status_handler(esp_zb_zcl_ota_upgrade_value_message
             }
 
             invoke_status_callback(ZIGBEE_OTA_STATUS_SUCCESS, 100);
-            ESP_LOGW(TAG, "OTA complete, restarting...");
-            esp_restart();
+            ESP_LOGW(TAG, "OTA complete, scheduling restart in 3 seconds...");
+            esp_zb_scheduler_alarm(ota_deferred_restart, 0, 3000);
         }
         break;
 
