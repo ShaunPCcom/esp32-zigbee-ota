@@ -25,6 +25,11 @@ static struct {
     uint32_t total_size;
     uint32_t downloaded_size;
     int64_t start_time_us;
+
+    /* Retry state */
+    uint8_t abort_retries;
+    uint16_t ota_server_addr;
+    uint8_t ota_server_endpoint;
 } s_ota_state = {
     .initialized = false,
     .endpoint = 0,
@@ -34,11 +39,15 @@ static struct {
     .total_size = 0,
     .downloaded_size = 0,
     .start_time_us = 0,
+    .abort_retries = 0,
+    .ota_server_addr = 0xffff,
+    .ota_server_endpoint = 0xff,
 };
 
 /* Forward declarations */
 static esp_err_t ota_upgrade_status_handler(esp_zb_zcl_ota_upgrade_value_message_t message);
 static esp_err_t ota_upgrade_query_image_resp_handler(esp_zb_zcl_ota_upgrade_query_image_resp_message_t message);
+static void ota_retry_alarm(uint8_t param);
 
 /**
  * @brief Invoke status callback if registered
@@ -64,7 +73,7 @@ static uint8_t calculate_progress(uint32_t downloaded, uint32_t total)
 
 /**
  * @brief Deferred restart callback for OTA completion
- * 
+ *
  * Scheduled via esp_zb_scheduler_alarm() to execute after the Zigbee stack
  * completes post-OTA processing (Upgrade End Response TX, etc.)
  */
@@ -73,6 +82,27 @@ static void ota_deferred_restart(uint8_t param)
     (void)param;
     ESP_LOGW(TAG, "Deferred OTA restart executing now");
     esp_restart();
+}
+
+/**
+ * @brief Deferred retry callback after OTA abort
+ *
+ * Scheduled via esp_zb_scheduler_alarm() to re-query the OTA server after
+ * a configurable delay following an abort.
+ */
+static void ota_retry_alarm(uint8_t param)
+{
+    (void)param;
+    ESP_LOGW(TAG, "OTA retry %u/%u: querying server 0x%04x endpoint %d",
+             s_ota_state.abort_retries, s_ota_state.config.max_abort_retries,
+             s_ota_state.ota_server_addr, s_ota_state.ota_server_endpoint);
+    esp_err_t ret = esp_zb_ota_upgrade_client_query_image_req(
+        s_ota_state.ota_server_addr, s_ota_state.ota_server_endpoint);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "OTA retry query failed: %s", esp_err_to_name(ret));
+        s_ota_state.abort_retries = 0;
+        invoke_status_callback(ZIGBEE_OTA_STATUS_FAILED, 0);
+    }
 }
 
 /**
@@ -93,6 +123,7 @@ static esp_err_t ota_upgrade_status_handler(esp_zb_zcl_ota_upgrade_value_message
         s_ota_state.start_time_us = esp_timer_get_time();
         s_ota_state.total_size = 0;
         s_ota_state.downloaded_size = 0;
+        s_ota_state.abort_retries = 0;
 
         /* Get next OTA partition */
         s_ota_state.ota_partition = esp_ota_get_next_update_partition(NULL);
@@ -198,6 +229,9 @@ static esp_err_t ota_upgrade_status_handler(esp_zb_zcl_ota_upgrade_value_message
                 return ret;
             }
 
+            s_ota_state.ota_handle = 0;
+            s_ota_state.ota_partition = NULL;
+            s_ota_state.abort_retries = 0;
             invoke_status_callback(ZIGBEE_OTA_STATUS_SUCCESS, 100);
             ESP_LOGW(TAG, "OTA complete, scheduling restart in 3 seconds...");
             esp_zb_scheduler_alarm(ota_deferred_restart, 0, 3000);
@@ -206,9 +240,35 @@ static esp_err_t ota_upgrade_status_handler(esp_zb_zcl_ota_upgrade_value_message
 
     case ESP_ZB_ZCL_OTA_UPGRADE_STATUS_ABORT:
         ESP_LOGW(TAG, "OTA upgrade aborted");
-        invoke_status_callback(ZIGBEE_OTA_STATUS_FAILED, 0);
+
+        /* Clean up OTA partition handle */
+        if (s_ota_state.ota_handle) {
+            esp_ota_abort(s_ota_state.ota_handle);
+            s_ota_state.ota_handle = 0;
+        }
+        s_ota_state.ota_partition = NULL;
         s_ota_state.downloaded_size = 0;
         s_ota_state.total_size = 0;
+
+        /* Retry if configured and server address is known */
+        if (s_ota_state.config.max_abort_retries > 0 &&
+            s_ota_state.abort_retries < s_ota_state.config.max_abort_retries &&
+            s_ota_state.ota_server_addr != 0xffff) {
+            s_ota_state.abort_retries++;
+            ESP_LOGW(TAG, "OTA aborted, scheduling retry %u/%u in %us",
+                     s_ota_state.abort_retries, s_ota_state.config.max_abort_retries,
+                     s_ota_state.config.retry_delay_seconds);
+            invoke_status_callback(ZIGBEE_OTA_STATUS_RETRYING, 0);
+            esp_zb_scheduler_alarm(ota_retry_alarm, 0,
+                                   (uint32_t)s_ota_state.config.retry_delay_seconds * 1000);
+        } else {
+            if (s_ota_state.abort_retries >= s_ota_state.config.max_abort_retries) {
+                ESP_LOGE(TAG, "OTA aborted, max retries (%u) exhausted",
+                         s_ota_state.config.max_abort_retries);
+            }
+            s_ota_state.abort_retries = 0;
+            invoke_status_callback(ZIGBEE_OTA_STATUS_FAILED, 0);
+        }
         ret = ESP_FAIL;
         break;
 
@@ -240,6 +300,10 @@ static esp_err_t ota_upgrade_query_image_resp_handler(esp_zb_zcl_ota_upgrade_que
         ESP_LOGI(TAG, "  Manufacturer: 0x%04x", message.manufacturer_code);
         ESP_LOGI(TAG, "  Size: %lu bytes", message.image_size);
         ESP_LOGI(TAG, "Approving OTA image upgrade");
+
+        /* Store server address for use by retry logic */
+        s_ota_state.ota_server_addr = message.server_addr.u.short_addr;
+        s_ota_state.ota_server_endpoint = message.server_endpoint;
         return ESP_OK;
     } else {
         ESP_LOGI(TAG, "No OTA update available (status: 0x%x)", message.info.status);

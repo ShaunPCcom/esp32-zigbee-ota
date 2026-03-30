@@ -3,6 +3,17 @@ build/
 sdkconfig
 sdkconfig.old
 dependencies.lock
+managed_components/
+
+# Firmware / linker artifacts
+*.bin
+*.elf
+*.map
+*.hex
+*.ota
+
+# Tooling / indexes
+compile_commands.json
 
 # Editor/IDE
 .vscode/

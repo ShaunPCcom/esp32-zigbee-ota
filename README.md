@@ -11,6 +11,7 @@ Reusable ESP-IDF component providing Zigbee Over-The-Air (OTA) firmware update c
 - ✅ **Z2M compatible**: Works with Zigbee2MQTT OTA server out of the box
 - ✅ **Automatic queries**: Configurable interval-based update checks
 - ✅ **Comprehensive logging**: Detailed progress and error reporting
+- ✅ **Tag header handling**: Automatically strips OTA element tag header from firmware images
 
 ## Requirements
 
@@ -190,7 +191,33 @@ Host your firmware images on GitHub Releases:
 3. Create a GitHub release and upload the `.bin` file
 4. Tag releases with version numbers matching your `current_file_version`
 
-### 3. OTA Index File (Optional)
+### 3. Creating OTA Images
+
+Use the ESP Zigbee SDK image builder tool to create proper Zigbee OTA images:
+
+```bash
+# Install zigpy if needed
+pip install zigpy
+
+# Create OTA image from firmware binary
+python $IDF_PATH/../esp-zigbee-sdk/tools/mfg_tool/image_builder_tool.py \
+    -mn "Espressif" \
+    -mc 0x131B \
+    -mt 0x0001 \
+    -fv 0x00010001 \
+    -in build/your_project.bin \
+    -o your_project_v1.0.0.1.ota
+```
+
+**Parameters:**
+- `-mn`: Manufacturer name (displayed in Z2M)
+- `-mc`: Manufacturer code (decimal, 0x131B = 4891 for Espressif)
+- `-mt`: Image type (your application ID, decimal)
+- `-fv`: File version (decimal, 0x00010001 = v1.0.0.1)
+- `-in`: Input firmware binary (from `build/`)
+- `-o`: Output OTA file name
+
+### 4. OTA Index File (Optional)
 
 For automatic update discovery, create an `index.json` file in your repo:
 
@@ -199,9 +226,8 @@ For automatic update discovery, create an `index.json` file in your repo:
   {
     "manufacturerCode": 4891,
     "imageType": 1,
-    "fileVersion": 65536,
-    "fileSize": 1234567,
-    "url": "https://github.com/YourUsername/YourProject/releases/download/v1.0.0/firmware.bin"
+    "fileVersion": 65537,
+    "url": "ota/your_project_v1.0.0.1.ota"
   }
 ]
 ```
@@ -213,12 +239,20 @@ For automatic update discovery, create an `index.json` file in your repo:
 - `fileSize`: Size of the `.bin` file in bytes
 - `url`: Direct download URL to the firmware binary
 
-Configure Z2M to use your index file in `configuration.yaml`:
+**For Z2M integration:**
+
+1. Place `index.json` in `/config/zigbee2mqtt/` directory
+2. Place OTA image files in `/config/zigbee2mqtt/ota/` subdirectory
+3. Configure Z2M in `configuration.yaml`:
 
 ```yaml
 ota:
-  zigbee_ota_override_index_location: https://raw.githubusercontent.com/YourUsername/YourProject/main/ota_index.json
+  update_check_interval: 1440  # Check every 24 hours
+  disable_automatic_update_check: false
+  zigbee_ota_override_index_location: ota_index.json
 ```
+
+**Note**: Use relative paths in `index.json` (`ota/filename.ota`) instead of absolute paths. Z2M resolves paths relative to the Zigbee2MQTT data directory (`/config/zigbee2mqtt/`).
 
 ## API Reference
 
@@ -261,11 +295,38 @@ Example: v1.2.3.4 = 0x01020304
 
 Update this value in your code when releasing new firmware versions.
 
+## Technical Details
+
+### OTA Image Format Handling
+
+Zigbee OTA images have a specific structure:
+```
+[56-byte OTA header] [6-byte Tag header] [ESP32 firmware binary]
+```
+
+The 6-byte tag header consists of:
+- 2 bytes: Tag ID (0x0000 = upgrade image element)
+- 4 bytes: Tag length (payload size)
+
+**ESP32 firmware validation**: The ESP-IDF OTA system (`esp_ota_write()`) expects raw ESP32 firmware starting with the magic byte `0xE9`. If the tag header is not stripped, validation fails with:
+
+```
+E (xxxxx) esp_ota_ops: OTA image has invalid magic byte (expected 0xE9, saw 0x00)
+```
+
+**Automatic handling**: This component automatically detects and strips the 6-byte tag header from the first data chunk before writing to the OTA partition. No special configuration needed.
+
+**Reference**: ESP Zigbee SDK OTA client example uses `esp_element_ota_data()` function for the same purpose. This component implements the same logic inline for simplicity.
+
 ## Troubleshooting
 
 ### OTA partition not found
 **Error:** `No OTA partition found`
 **Solution:** Ensure your partition table includes `ota_0` and `ota_1` partitions. Use `idf.py partition-table` to verify.
+
+### Invalid magic byte error
+**Error:** `OTA image has invalid magic byte (expected 0xE9, saw 0x00)`
+**Solution:** This should be handled automatically by the component (tag header stripping). If you see this error, ensure you're using the latest version of this component (v1.0.1+). The fix was added in commit 095da09.
 
 ### Z2M doesn't show update available
 **Check:**

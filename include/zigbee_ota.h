@@ -24,7 +24,8 @@ typedef enum {
     ZIGBEE_OTA_STATUS_DOWNLOAD_COMPLETE,/*!< Download finished, validating */
     ZIGBEE_OTA_STATUS_APPLYING,         /*!< Applying new firmware */
     ZIGBEE_OTA_STATUS_SUCCESS,          /*!< OTA completed successfully, will restart */
-    ZIGBEE_OTA_STATUS_FAILED,           /*!< OTA failed or aborted */
+    ZIGBEE_OTA_STATUS_FAILED,           /*!< OTA failed or aborted, retries exhausted */
+    ZIGBEE_OTA_STATUS_RETRYING,         /*!< OTA aborted, will retry automatically */
     ZIGBEE_OTA_STATUS_SERVER_NOT_FOUND, /*!< OTA server not found on network */
 } zigbee_ota_status_t;
 
@@ -49,6 +50,8 @@ typedef struct {
     uint16_t hw_version;                /*!< Hardware version */
     uint16_t query_interval_minutes;    /*!< Auto-query interval in minutes (0 = disabled, default 1440 = 24 hours) */
     uint8_t max_data_size;              /*!< Maximum OTA block size in bytes (default 64) */
+    uint8_t max_abort_retries;          /*!< Max automatic retries after abort (0 = disabled, default 3) */
+    uint16_t retry_delay_seconds;       /*!< Delay before retry after abort, in seconds (default 30) */
 } zigbee_ota_config_t;
 
 /**
@@ -61,6 +64,8 @@ typedef struct {
     .hw_version = 1,                                            \
     .query_interval_minutes = 1440,     /* 24 hours */          \
     .max_data_size = 64,                                        \
+    .max_abort_retries = 3,                                     \
+    .retry_delay_seconds = 30,                                  \
 }
 
 /**
