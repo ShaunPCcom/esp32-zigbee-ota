@@ -33,3 +33,6 @@ __pycache__/
 # Misc
 *.log
 .cache/
+
+# Git worktrees
+.worktrees/
