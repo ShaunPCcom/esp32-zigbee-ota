@@ -17,7 +17,7 @@
  * Acquires the OTA slot atomically and spawns a background download task.
  * Returns immediately so the HTTP response can be sent without blocking.
  *
- * @param url  HTTPS URL of the .ota image file
+ * @param url  OTA index JSON URL, or NULL to use the built-in default (OTA_WIFI_DEFAULT_INDEX_URL)
  *
  * @return
  *   ESP_OK               Accepted (HTTP 202) — download started in background

@@ -14,11 +14,6 @@ static const char *TAG = "ota_trigger_web";
 
 esp_err_t ota_trigger_web_start(const char *url)
 {
-    if (!url || url[0] == '\0') {
-        ESP_LOGE(TAG, "No URL provided");
-        return ESP_ERR_INVALID_ARG;
-    }
-
     /* Atomically claim the OTA slot — rejects concurrent triggers */
     esp_err_t ret = ota_state_acquire(OTA_SOURCE_WIFI);
     if (ret != ESP_OK) {
