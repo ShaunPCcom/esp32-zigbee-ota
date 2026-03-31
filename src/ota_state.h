@@ -67,3 +67,8 @@ void      ota_state_reset_abort_retries(void);
 
 const zigbee_ota_config_t *ota_state_get_config(void);
 uint8_t   ota_state_get_endpoint(void);
+
+/* --- Wi-Fi OTA index URL override (C6 only; NULL means use built-in default) --- */
+
+void        ota_state_set_wifi_index_url(const char *url);  /* NULL clears override */
+const char *ota_state_get_wifi_index_url(void);             /* NULL if no override set */

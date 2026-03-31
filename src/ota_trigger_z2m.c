@@ -31,7 +31,7 @@ esp_err_t ota_trigger_z2m_on_image_available(uint16_t    server_addr,
             return ret;
         }
         ESP_LOGI(TAG, "Wi-Fi connected — using Wi-Fi OTA transport");
-        return ota_wifi_transport_start(NULL);  /* NULL = use OTA_WIFI_DEFAULT_INDEX_URL */
+        return ota_wifi_transport_start(ota_state_get_wifi_index_url());
     }
     ESP_LOGI(TAG, "Wi-Fi not connected — falling back to Zigbee OTA");
 #endif /* CONFIG_IDF_TARGET_ESP32C6 */

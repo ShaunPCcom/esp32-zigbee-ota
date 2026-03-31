@@ -159,6 +159,11 @@ esp_err_t zigbee_ota_set_query_interval(uint16_t interval_minutes)
 #if CONFIG_IDF_TARGET_ESP32C6
 #include "ota_trigger_web.h"
 
+void zigbee_ota_set_wifi_index_url(const char *url)
+{
+    ota_state_set_wifi_index_url(url);
+}
+
 esp_err_t zigbee_ota_start_wifi_update(const char *index_url)
 {
     return ota_trigger_web_start(index_url);

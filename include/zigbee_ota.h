@@ -168,6 +168,19 @@ esp_err_t zigbee_ota_set_query_interval(uint16_t interval_minutes);
 
 #if CONFIG_IDF_TARGET_ESP32C6
 /**
+ * @brief Override the Wi-Fi OTA index URL (C6 only)
+ *
+ * When set, this URL is used by both the Z2M-triggered Wi-Fi transport and the
+ * web UI trigger instead of the built-in default. Pass NULL or an empty string
+ * to clear the override and revert to the default.
+ *
+ * Typically called at startup after loading the URL from NVS.
+ *
+ * @param url  OTA index JSON URL, or NULL to use the built-in default.
+ */
+void zigbee_ota_set_wifi_index_url(const char *url);
+
+/**
  * @brief Trigger a Wi-Fi OTA update from the web UI (C6 only)
  *
  * Acquires the OTA slot and starts a background download task. Returns

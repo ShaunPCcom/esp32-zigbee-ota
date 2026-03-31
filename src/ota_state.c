@@ -7,6 +7,7 @@
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <string.h>
 
 static portMUX_TYPE s_in_progress_mux = portMUX_INITIALIZER_UNLOCKED;
 
@@ -28,6 +29,9 @@ static struct {
 
     /* Retry counter */
     uint8_t                      abort_retries;
+
+    /* Wi-Fi OTA index URL override (NULL = use built-in default) */
+    char                         wifi_index_url[256];
 } s_state = {
     .initialized    = false,
     .server_addr    = 0xffff,
@@ -135,4 +139,18 @@ const zigbee_ota_config_t *ota_state_get_config(void)
 uint8_t ota_state_get_endpoint(void)
 {
     return s_state.endpoint;
+}
+
+void ota_state_set_wifi_index_url(const char *url)
+{
+    if (url && url[0]) {
+        strlcpy(s_state.wifi_index_url, url, sizeof(s_state.wifi_index_url));
+    } else {
+        s_state.wifi_index_url[0] = '\0';
+    }
+}
+
+const char *ota_state_get_wifi_index_url(void)
+{
+    return s_state.wifi_index_url[0] ? s_state.wifi_index_url : NULL;
 }
