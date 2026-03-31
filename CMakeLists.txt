@@ -14,7 +14,7 @@ if(CONFIG_IDF_TARGET_ESP32C6)
         "src/ota_wifi_transport.c"
         "src/ota_trigger_web.c"
     )
-    list(APPEND requires esp_http_client)
+    list(APPEND requires esp_http_client esp_wifi json)
 endif()
 
 idf_component_register(
