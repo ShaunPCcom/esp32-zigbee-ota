@@ -21,7 +21,8 @@ esp_err_t ota_trigger_web_start(const char *url)
         return ret;  /* ESP_ERR_INVALID_STATE → caller returns HTTP 409 */
     }
 
-    ESP_LOGI(TAG, "Web UI OTA trigger accepted: %s", url);
+    ESP_LOGI(TAG, "Web UI OTA trigger accepted, index: %s",
+             url ? url : "(default)");
     ret = ota_wifi_transport_start(url);
     if (ret != ESP_OK) {
         /* Task creation failed — release the slot so future attempts work */
