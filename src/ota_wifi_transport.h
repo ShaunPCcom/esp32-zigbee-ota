@@ -6,7 +6,6 @@
 #pragma once
 
 /* Wi-Fi OTA transport — ESP32-C6 only */
-#ifdef CONFIG_IDF_TARGET_ESP32C6
 
 #include <stdbool.h>
 #include "esp_err.h"
@@ -20,6 +19,8 @@
  */
 #define OTA_WIFI_DEFAULT_INDEX_URL \
     "https://shaunpccom.github.io/zigbee-ota-index/ota_index.json"
+
+#ifdef CONFIG_IDF_TARGET_ESP32C6
 
 /**
  * @brief Check whether a Wi-Fi station connection is active

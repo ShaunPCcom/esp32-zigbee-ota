@@ -57,7 +57,7 @@ static esp_err_t ota_index_resolve(const char *index_url,
         .url               = index_url,
         .timeout_ms        = 15000,
         .crt_bundle_attach = esp_crt_bundle_attach,
-        .follow_redirects  = true,
+        .disable_auto_redirect = false,
         .max_redirection_count = 3,
     };
     esp_http_client_handle_t client = esp_http_client_init(&http_cfg);
@@ -194,7 +194,7 @@ static void wifi_ota_task(void *arg)
         .timeout_ms        = 60000,
         .buffer_size       = 4096,
         .crt_bundle_attach = esp_crt_bundle_attach,
-        .follow_redirects  = true,
+        .disable_auto_redirect = false,
         .max_redirection_count = 5,
     };
     esp_http_client_handle_t client = esp_http_client_init(&http_cfg);
