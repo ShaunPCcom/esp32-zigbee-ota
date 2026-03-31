@@ -12,6 +12,16 @@
 #include "esp_err.h"
 
 /**
+ * @brief Default OTA index URL
+ *
+ * GitHub Pages aggregated index. Contains one entry per device, keyed by
+ * (manufacturerCode, imageType). The Wi-Fi transport fetches this, finds the
+ * entry matching the running device's imageType, and downloads that .ota file.
+ */
+#define OTA_WIFI_DEFAULT_INDEX_URL \
+    "https://shaunpccom.github.io/zigbee-ota-index/ota_index.json"
+
+/**
  * @brief Check whether a Wi-Fi station connection is active
  *
  * Wraps esp_wifi_sta_get_ap_info() so callers (e.g. ota_trigger_z2m) do not
@@ -24,21 +34,17 @@ bool ota_wifi_transport_is_connected(void);
 /**
  * @brief Start a Wi-Fi OTA download in a background task
  *
- * Spawns a FreeRTOS task that calls ota_wifi_transport_run(url). Returns
- * immediately (HTTP download happens asynchronously).
+ * Fetches the OTA index from @p index_url, resolves the device's .ota file URL
+ * by matching imageType, then downloads and installs the firmware.
  *
- * The OTA in-progress slot must already be acquired by the caller
- * (ota_trigger_z2m or ota_trigger_web) before calling this.
+ * The OTA in-progress slot must already be acquired by the caller before calling
+ * this. The URL string is copied internally — no lifetime constraint on the caller.
  *
- * On completion:  ota_writer_finish() → ota_zigbee_send_upgrade_end(SUCCESS)
- *                 → ota_state_notify(SUCCESS) → ota_state_release()
- *                 → esp_timer one-shot 3 s → esp_restart()
+ * @param index_url  OTA index JSON URL, or NULL to use OTA_WIFI_DEFAULT_INDEX_URL.
  *
- * On failure:     ota_writer_abort() → ota_zigbee_send_upgrade_end(ABORT)
- *                 → ota_state_notify(FAILED) → ota_state_release()
- *
- * @param url  HTTPS URL of the .ota image file (same file as Zigbee OTA index)
+ * @return ESP_OK         Task spawned successfully (download in background)
+ * @return ESP_ERR_NO_MEM strdup or task creation failed
  */
-esp_err_t ota_wifi_transport_start(const char *url);
+esp_err_t ota_wifi_transport_start(const char *index_url);
 
 #endif /* CONFIG_IDF_TARGET_ESP32C6 */
