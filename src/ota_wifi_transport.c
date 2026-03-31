@@ -131,31 +131,171 @@ static esp_err_t ota_index_resolve(const char *index_url,
 }
 
 /* ------------------------------------------------------------------ */
-/*  Stubs — download loop implemented in Task 4                        */
+/*  Deferred restart (3 s after successful OTA)                         */
 /* ------------------------------------------------------------------ */
+
+static void restart_cb(void *arg)
+{
+    (void)arg;
+    ESP_LOGI(TAG, "Wi-Fi OTA restart");
+    esp_restart();
+}
+
+static void schedule_restart(void)
+{
+    esp_timer_handle_t t;
+    const esp_timer_create_args_t args = {
+        .callback = restart_cb,
+        .name     = "ota_rst",
+    };
+    if (esp_timer_create(&args, &t) == ESP_OK) {
+        esp_timer_start_once(t, 3000000);  /* 3 s in µs */
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/*  Download loop                                                        */
+/* ------------------------------------------------------------------ */
+
+static uint8_t s_dl_buf[4096];  /* static — not on task stack */
 
 static void wifi_ota_task(void *arg)
 {
-    char *index_url = (char *)arg;  /* strdup'd in ota_wifi_transport_start */
-    ESP_LOGI(TAG, "Wi-Fi OTA task started — not yet implemented");
-    ESP_LOGI(TAG, "  index URL: %s", index_url);
+    char *index_url = (char *)arg;  /* strdup'd — must free */
+
+    /* --- 1. Resolve direct .ota URL from index --- */
+    char ota_url[OTA_URL_MAX_SIZE];
+    esp_err_t err = ota_index_resolve(index_url, ota_url, sizeof(ota_url));
     free(index_url);
-    ota_state_notify(ZIGBEE_OTA_STATUS_FAILED, 0);
+
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Index resolve failed: %s", esp_err_to_name(err));
+        ota_state_notify(ZIGBEE_OTA_STATUS_FAILED, 0);
+        ota_state_release();
+        vTaskDelete(NULL);
+        return;
+    }
+
+    /* --- 2. Prepare partition write --- */
+    ota_header_reset(OTA_HEADER_MODE_FULL_FILE);  /* strip 62 bytes: 56-byte file header + 6-byte element header */
+    err = ota_writer_begin();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ota_writer_begin: %s", esp_err_to_name(err));
+        ota_state_notify(ZIGBEE_OTA_STATUS_FAILED, 0);
+        ota_state_release();
+        vTaskDelete(NULL);
+        return;
+    }
+    ota_state_notify(ZIGBEE_OTA_STATUS_START, 0);
+
+    /* --- 3. HTTP GET the .ota file --- */
+    esp_http_client_config_t http_cfg = {
+        .url               = ota_url,
+        .timeout_ms        = 60000,
+        .buffer_size       = 4096,
+        .crt_bundle_attach = esp_crt_bundle_attach,
+        .follow_redirects  = true,
+        .max_redirection_count = 5,
+    };
+    esp_http_client_handle_t client = esp_http_client_init(&http_cfg);
+    if (!client) {
+        ota_writer_abort();
+        ota_state_notify(ZIGBEE_OTA_STATUS_FAILED, 0);
+        ota_state_release();
+        vTaskDelete(NULL);
+        return;
+    }
+
+    err = esp_http_client_open(client, 0);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "HTTP open: %s", esp_err_to_name(err));
+        esp_http_client_cleanup(client);
+        ota_writer_abort();
+        ota_state_notify(ZIGBEE_OTA_STATUS_FAILED, 0);
+        ota_state_release();
+        vTaskDelete(NULL);
+        return;
+    }
+
+    int content_len = (int)esp_http_client_fetch_headers(client);
+    ESP_LOGI(TAG, "OTA file size: %d bytes", content_len);
+
+    /* --- 4. Download + write loop --- */
+    int total_read = 0;
+    bool ok = true;
+
+    while (true) {
+        int r = esp_http_client_read(client, (char *)s_dl_buf, sizeof(s_dl_buf));
+        if (r < 0) {
+            ESP_LOGE(TAG, "HTTP read error %d", r);
+            ok = false;
+            break;
+        }
+        if (r == 0) break;  /* EOF */
+
+        const uint8_t *fw_data;
+        size_t fw_len;
+        ota_header_process(s_dl_buf, (size_t)r, &fw_data, &fw_len);
+
+        if (fw_len > 0) {
+            err = ota_writer_write(fw_data, fw_len);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG, "ota_writer_write: %s", esp_err_to_name(err));
+                ok = false;
+                break;
+            }
+        }
+
+        total_read += r;
+        if (content_len > 0) {
+            uint8_t pct = (uint8_t)((int64_t)total_read * 100 / content_len);
+            ota_state_notify(ZIGBEE_OTA_STATUS_DOWNLOADING, pct);
+        }
+    }
+
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+
+    /* --- 5. Finalise or abort --- */
+    if (!ok) {
+        ota_writer_abort();
+        ota_state_notify(ZIGBEE_OTA_STATUS_FAILED, 0);
+        ota_state_release();
+        vTaskDelete(NULL);
+        return;
+    }
+
+    err = ota_writer_finish();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "ota_writer_finish: %s", esp_err_to_name(err));
+        ota_state_notify(ZIGBEE_OTA_STATUS_FAILED, 0);
+        ota_state_release();
+        vTaskDelete(NULL);
+        return;
+    }
+
+    ESP_LOGI(TAG, "Wi-Fi OTA complete — restarting in 3 s");
+    ota_state_notify(ZIGBEE_OTA_STATUS_SUCCESS, 100);
     ota_state_release();
+    schedule_restart();
     vTaskDelete(NULL);
 }
 
 esp_err_t ota_wifi_transport_start(const char *index_url)
 {
     const char *src = (index_url != NULL) ? index_url : OTA_WIFI_DEFAULT_INDEX_URL;
+
     char *url_copy = strdup(src);
     if (!url_copy) {
         return ESP_ERR_NO_MEM;
     }
+
+    ESP_LOGI(TAG, "Spawning Wi-Fi OTA task, index: %s", url_copy);
     BaseType_t created = xTaskCreate(wifi_ota_task, "wifi_ota",
                                      8192, url_copy, 5, NULL);
     if (created != pdPASS) {
         free(url_copy);
+        ESP_LOGE(TAG, "Task create failed");
         return ESP_ERR_NO_MEM;
     }
     return ESP_OK;
