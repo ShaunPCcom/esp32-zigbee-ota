@@ -166,6 +166,23 @@ esp_err_t zigbee_ota_start_query(uint16_t server_addr, uint8_t server_endpoint);
  */
 esp_err_t zigbee_ota_set_query_interval(uint16_t interval_minutes);
 
+#if CONFIG_IDF_TARGET_ESP32C6
+/**
+ * @brief Trigger a Wi-Fi OTA update from the web UI (C6 only)
+ *
+ * Acquires the OTA slot and starts a background download task. Returns
+ * immediately — the download runs asynchronously.
+ *
+ * @param index_url  OTA index JSON URL, or NULL to use the built-in default.
+ *                   The string is copied internally.
+ *
+ * @return ESP_OK               Download started (HTTP 202)
+ * @return ESP_ERR_INVALID_STATE OTA already in progress (HTTP 409)
+ * @return ESP_ERR_NO_MEM       Memory or task creation failure
+ */
+esp_err_t zigbee_ota_start_wifi_update(const char *index_url);
+#endif /* CONFIG_IDF_TARGET_ESP32C6 */
+
 #ifdef __cplusplus
 }
 #endif
