@@ -155,3 +155,12 @@ esp_err_t zigbee_ota_set_query_interval(uint16_t interval_minutes)
     ESP_LOGI(TAG, "Query interval set to %u min", interval_minutes);
     return ESP_OK;
 }
+
+#if CONFIG_IDF_TARGET_ESP32C6
+#include "ota_trigger_web.h"
+
+esp_err_t zigbee_ota_start_wifi_update(const char *index_url)
+{
+    return ota_trigger_web_start(index_url);
+}
+#endif /* CONFIG_IDF_TARGET_ESP32C6 */
