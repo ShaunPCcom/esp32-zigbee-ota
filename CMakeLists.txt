@@ -9,7 +9,7 @@ set(srcs
 
 set(requires esp-zigbee-lib app_update nvs_flash esp_timer freertos)
 
-if(CONFIG_IDF_TARGET_ESP32C6)
+if(IDF_TARGET STREQUAL "esp32c6")
     list(APPEND srcs
         "src/ota_wifi_transport.c"
         "src/ota_trigger_web.c"
