@@ -69,7 +69,8 @@ void ota_zigbee_retry_alarm(uint8_t param)
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Retry query failed: %s", esp_err_to_name(ret));
         ota_state_reset_abort_retries();
-        ota_state_release();
+        /* Slot was already released in the ABORT handler before this alarm
+         * was scheduled — do not release again. */
         ota_state_notify(ZIGBEE_OTA_STATUS_FAILED, 0);
     }
 }
@@ -114,11 +115,13 @@ esp_err_t ota_zigbee_handle_upgrade_value(esp_zb_zcl_ota_upgrade_value_message_t
     switch (msg.upgrade_status) {
 
     case ESP_ZB_ZCL_OTA_UPGRADE_STATUS_START:
-        /* Defensive guard: the Zigbee SDK may fire START even if the query
-         * response callback returned an error (e.g. Wi-Fi OTA already running).
-         * Only proceed if the Zigbee transport legitimately holds the slot. */
-        if (ota_state_get_source() != OTA_SOURCE_ZIGBEE) {
-            ESP_LOGW(TAG, "Zigbee OTA START rejected — slot held by source %d (not Zigbee)",
+        /* Acquire the OTA slot here, not at query-response time.
+         * Acquiring at query time leaves the slot held if START never fires
+         * (e.g. after a Z2M "check" that doesn't initiate block transfer).
+         * Fails if another transport (e.g. Wi-Fi) already holds the slot. */
+        ret = ota_state_acquire(OTA_SOURCE_ZIGBEE);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Zigbee OTA START rejected — slot held by source %d",
                      (int)ota_state_get_source());
             return ESP_FAIL;
         }
@@ -228,8 +231,11 @@ esp_err_t ota_zigbee_handle_upgrade_value(esp_zb_zcl_ota_upgrade_value_message_t
                          ota_state_get_abort_retries(), cfg->max_abort_retries,
                          cfg->retry_delay_seconds);
                 ota_state_notify(ZIGBEE_OTA_STATUS_RETRYING, 0);
-                /* Keep in-progress guard held through the retry delay — prevents a
-                 * parallel trigger from interfering between retries. */
+                /* Release slot before scheduling — the START callback re-acquires
+                 * it when the retry query response triggers block transfer.
+                 * Holding the slot here would cause the retry's query response to
+                 * fail acquire and log "OTA already in progress". */
+                ota_state_release();
                 esp_zb_scheduler_alarm(ota_zigbee_retry_alarm, 0,
                                        (uint32_t)cfg->retry_delay_seconds * 1000);
             } else {
@@ -267,6 +273,14 @@ esp_err_t ota_zigbee_handle_query_image_resp(esp_zb_zcl_ota_upgrade_query_image_
     if (msg.info.status != ESP_ZB_ZCL_STATUS_SUCCESS) {
         ESP_LOGI(TAG, "No OTA update available (status 0x%x)", msg.info.status);
         return ESP_OK;  /* Not an error — simply no update */
+    }
+
+    /* A query response with version=0 and size=0 is a "check only" notification
+     * from Z2M (no real image data yet).  Ignore it to avoid triggering a
+     * download on every OTA status check. */
+    if (msg.file_version == 0 && msg.image_size == 0) {
+        ESP_LOGI(TAG, "OTA check response (version=0, size=0) — not triggering download");
+        return ESP_OK;
     }
 
     ESP_LOGI(TAG, "OTA image available: version 0x%08lx, size %lu, server 0x%04x ep %u",

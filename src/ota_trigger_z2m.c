@@ -36,16 +36,13 @@ esp_err_t ota_trigger_z2m_on_image_available(uint16_t    server_addr,
     ESP_LOGI(TAG, "Wi-Fi not connected — falling back to Zigbee OTA");
 #endif /* CONFIG_IDF_TARGET_ESP32C6 */
 
-    /* Zigbee transport: acquire slot then return ESP_OK.
-     * The Zigbee SDK auto-starts Image Block Requests after the query
-     * image response is acknowledged — no further action needed here. */
-    esp_err_t ret = ota_state_acquire(OTA_SOURCE_ZIGBEE);
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "OTA already in progress, ignoring Z2M notification");
-        return ret;
-    }
-
-    ESP_LOGI(TAG, "Using Zigbee OTA transport (server 0x%04x ep %u)",
+    /* Zigbee transport: server info already stored above.
+     * Do NOT acquire the OTA slot here — the slot is acquired in the
+     * OTA_START callback once the Zigbee SDK actually begins block transfer.
+     * Acquiring here leaves the slot permanently held if START never fires
+     * (e.g. a Z2M "check for update" produces a query response but does not
+     * initiate block transfer, unlike a Z2M "trigger update"). */
+    ESP_LOGI(TAG, "Zigbee OTA image available on server 0x%04x ep %u — awaiting START",
              server_addr, server_endpoint);
     return ESP_OK;
 }

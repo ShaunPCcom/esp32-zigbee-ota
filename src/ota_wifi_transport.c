@@ -40,7 +40,7 @@ bool ota_wifi_transport_is_connected(void)
 /* ------------------------------------------------------------------ */
 
 #define OTA_INDEX_MAX_SIZE 8192
-#define OTA_URL_MAX_SIZE   512
+#define OTA_URL_MAX_SIZE   2048
 
 /**
  * Fetch @p index_url (HTTPS JSON array), find the entry whose imageType
@@ -154,10 +154,93 @@ static void schedule_restart(void)
 }
 
 /* ------------------------------------------------------------------ */
-/*  Download loop                                                        */
+/*  Redirect pre-resolution                                             */
+/*                                                                      */
+/*  GitHub release URLs redirect: github.com → objects.githubusercontent */
+/*  The streaming open()+read() API fails with redirects (0 content-   */
+/*  length), and perform() buffers all redirect headers causing "Out of */
+/*  buffer" even at 16KB.  Solution: pre-resolve the redirect chain    */
+/*  with a lightweight HEAD-style pass that captures Location headers,  */
+/*  then download directly from the final CDN URL (no redirects).      */
 /* ------------------------------------------------------------------ */
 
-static uint8_t s_dl_buf[4096];  /* static — not on task stack */
+typedef struct {
+    char location[OTA_URL_MAX_SIZE];
+    bool found;
+} location_ctx_t;
+
+static esp_err_t location_event_handler(esp_http_client_event_t *evt)
+{
+    location_ctx_t *ctx = (location_ctx_t *)evt->user_data;
+    if (evt->event_id == HTTP_EVENT_ON_HEADER &&
+        strcasecmp(evt->header_key, "Location") == 0) {
+        strlcpy(ctx->location, evt->header_value, sizeof(ctx->location));
+        ctx->found = true;
+    }
+    return ESP_OK;
+}
+
+/**
+ * Follow HTTP redirects for @p url and write the final (200-returning)
+ * URL into @p out_url.  Uses disable_auto_redirect=true and captures
+ * Location headers via event handler.
+ */
+static esp_err_t resolve_final_url(const char *url, char *out_url, size_t out_size)
+{
+    char current[OTA_URL_MAX_SIZE];
+    strlcpy(current, url, sizeof(current));
+
+    for (int i = 0; i <= 5; i++) {
+        location_ctx_t loc_ctx = { .found = false };
+
+        esp_http_client_config_t cfg = {
+            .url                   = current,
+            .timeout_ms            = 30000,
+            .buffer_size           = 4096,
+            .buffer_size_tx        = 4096,
+            .crt_bundle_attach     = esp_crt_bundle_attach,
+            .event_handler         = location_event_handler,
+            .user_data             = &loc_ctx,
+            .disable_auto_redirect = true,
+        };
+        esp_http_client_handle_t c = esp_http_client_init(&cfg);
+        if (!c) return ESP_ERR_NO_MEM;
+
+        esp_err_t err = esp_http_client_open(c, 0);
+        if (err != ESP_OK) {
+            esp_http_client_cleanup(c);
+            return err;
+        }
+        esp_http_client_fetch_headers(c);
+        int status = esp_http_client_get_status_code(c);
+
+        /* Drain any body so the connection closes cleanly */
+        char drain[64];
+        while (esp_http_client_read(c, drain, sizeof(drain)) > 0) {}
+        esp_http_client_close(c);
+        esp_http_client_cleanup(c);
+
+        if (status == 200) {
+            strlcpy(out_url, current, out_size);
+            return ESP_OK;
+        }
+        if (status >= 300 && status < 400 && loc_ctx.found) {
+            ESP_LOGI(TAG, "Redirect %d: %s", status, loc_ctx.location);
+            strlcpy(current, loc_ctx.location, sizeof(current));
+            continue;
+        }
+        ESP_LOGE(TAG, "Unexpected HTTP %d from %s", status, current);
+        return ESP_FAIL;
+    }
+    ESP_LOGE(TAG, "Too many redirects");
+    return ESP_FAIL;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Download loop (no redirects — always called with final CDN URL)    */
+/* ------------------------------------------------------------------ */
+
+static uint8_t s_dl_buf[4096];
 
 static void wifi_ota_task(void *arg)
 {
@@ -176,6 +259,18 @@ static void wifi_ota_task(void *arg)
         return;
     }
 
+    /* --- 1b. Pre-resolve redirects to get final CDN URL --- */
+    char final_url[OTA_URL_MAX_SIZE];
+    err = resolve_final_url(ota_url, final_url, sizeof(final_url));
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Redirect resolve failed: %s", esp_err_to_name(err));
+        ota_state_notify(ZIGBEE_OTA_STATUS_FAILED, 0);
+        ota_state_release();
+        vTaskDelete(NULL);
+        return;
+    }
+    ESP_LOGI(TAG, "Final URL: %s", final_url);
+
     /* --- 2. Prepare partition write --- */
     ota_header_reset(OTA_HEADER_MODE_FULL_FILE);  /* strip 62 bytes: 56-byte file header + 6-byte element header */
     err = ota_writer_begin();
@@ -188,14 +283,14 @@ static void wifi_ota_task(void *arg)
     }
     ota_state_notify(ZIGBEE_OTA_STATUS_START, 0);
 
-    /* --- 3. HTTP GET the .ota file --- */
+    /* --- 3. HTTP GET the final URL (no redirects) --- */
     esp_http_client_config_t http_cfg = {
-        .url               = ota_url,
-        .timeout_ms        = 60000,
-        .buffer_size       = 4096,
-        .crt_bundle_attach = esp_crt_bundle_attach,
-        .disable_auto_redirect = false,
-        .max_redirection_count = 5,
+        .url                   = final_url,
+        .timeout_ms            = 60000,
+        .buffer_size           = 4096,
+        .buffer_size_tx        = 4096,
+        .crt_bundle_attach     = esp_crt_bundle_attach,
+        .disable_auto_redirect = true,
     };
     esp_http_client_handle_t client = esp_http_client_init(&http_cfg);
     if (!client) {
@@ -292,7 +387,7 @@ esp_err_t ota_wifi_transport_start(const char *index_url)
 
     ESP_LOGI(TAG, "Spawning Wi-Fi OTA task, index: %s", url_copy);
     BaseType_t created = xTaskCreate(wifi_ota_task, "wifi_ota",
-                                     8192, url_copy, 5, NULL);
+                                     12288, url_copy, 5, NULL);
     if (created != pdPASS) {
         free(url_copy);
         ESP_LOGE(TAG, "Task create failed");
