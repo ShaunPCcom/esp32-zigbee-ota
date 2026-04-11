@@ -13,8 +13,9 @@ if(IDF_TARGET STREQUAL "esp32c6")
     list(APPEND srcs
         "src/ota_wifi_transport.c"
         "src/ota_trigger_web.c"
+        "src/ota_upload_transport.c"
     )
-    list(APPEND requires esp_http_client esp_wifi json mbedtls)
+    list(APPEND requires esp_http_client esp_http_server esp_wifi json mbedtls)
 endif()
 
 idf_component_register(
