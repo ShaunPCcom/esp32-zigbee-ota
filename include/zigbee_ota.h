@@ -103,6 +103,14 @@ esp_err_t zigbee_ota_init(esp_zb_cluster_list_t *cluster_list, uint8_t endpoint,
 esp_err_t zigbee_ota_register_status_callback(zigbee_ota_status_callback_t callback);
 
 /**
+ * @brief Returns true if an OTA update is currently in progress (any transport).
+ *
+ * Safe to call from any task. Used by the web server to expose OTA state via
+ * /api/ota/status.
+ */
+bool zigbee_ota_is_in_progress(void);
+
+/**
  * @brief Register the OTA action handler
  *
  * Internal function that must be called by the application's action handler.

@@ -104,6 +104,11 @@ esp_err_t zigbee_ota_register_status_callback(zigbee_ota_status_callback_t callb
     return ESP_OK;
 }
 
+bool zigbee_ota_is_in_progress(void)
+{
+    return ota_state_is_in_progress();
+}
+
 esp_err_t zigbee_ota_action_handler(esp_zb_core_action_callback_id_t callback_id,
                                      const void *message)
 {
